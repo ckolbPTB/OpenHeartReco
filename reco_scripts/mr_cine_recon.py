@@ -3,13 +3,21 @@ import shutil
 
 from pathlib import Path
 import sirf_preprocessing as preprocess
+import sirf_util as util
 import sirf.Gadgetron as pMR
+
+from cil.optimisation.algorithms import FISTA
+from cil.optimisation.functions import LeastSquares, ZeroFunction
 
 import sys
 from pathlib import Path
 
+# Support scan times
+scan_types = {'0001' : 'm2DCartCine',
+                '0002' : '2DRadRTCine'}
 
-def main_cine_recon(fpath_in, fpath_output_prefix):
+
+def main_recon(fpath_in, fpath_output_prefix):
 
     print(f"Reading from {fpath_in}, writing into {fpath_output_prefix}")
     assert os.access(fpath_in, os.R_OK), f"You don't have read permission in {fpath_in}"
@@ -19,9 +27,15 @@ def main_cine_recon(fpath_in, fpath_output_prefix):
     success = True
 
     for fname_raw in list_rawdata:
-        mr_data = preprocess.equally_fill_cardiac_phases(str(fname_raw))
-        success *= sirf_cine_recon(mr_data, fpath_output_prefix)
-
+        # Select reconstruction type
+        scan_type_code = str(fname_raw)[-7:-3]
+        if scan_type_code == '0001': # M2D Cartesian Cine
+            success *= sirf_m2d_cine_cart_recon(str(fname_raw), fpath_output_prefix)
+        elif scan_type_code == '0002': # 2D Real-time non-Cartesian
+            success *= sirf_2d_rt_non_cart_recon(str(fname_raw), fpath_output_prefix)
+        else:
+            raise KeyError(f'Scan type {scan_type_code} not recognised. Supporte scan type codes are {scan_types}')
+    
     list_attribute_files = sorted(fpath_output_prefix.glob( "*_attrib.xml"))
     print(f"We remain with {len(list_attribute_files)} to delete.")
     [os.remove(attrib_file) for attrib_file in list_attribute_files]
@@ -30,6 +44,62 @@ def main_cine_recon(fpath_in, fpath_output_prefix):
 
     return int(not success)
 
+
+def sirf_2d_rt_non_cart_recon(fname_raw: str, fprefix_out: Path):
+    
+    # Load in data
+    rd = pMR.AcquisitionData(fname_raw, all_=False)
+    rd = pMR.preprocess_acquisition_data(rd)
+    
+    # Check if trajectory exists
+    try:
+        ktraj = pMR.get_data_trajectory(rd)
+    except Exception as e:
+        print(f'Trajectory not found: {e}.')
+        return(False)
+
+    # Verify data is not Cartesian
+    assert rd.check_traj_type('cartesian') == False, 'Cartesian data cannot be reconstructed as radial'
+    
+    # Calculate coil sensitivity maps
+    csm = pMR.CoilSensitivityData()
+    csm.smoothness = 100
+    csm.calculate(rd)
+
+    # Set up iterative reconstruction
+    x_init = pMR.ImageData()
+    x_init.from_acquisition_data(rd)
+    E = pMR.AcquisitionModel(acqs=rd, imgs=x_init)
+    E.set_coil_sensitivity_maps(csm)
+
+    # Define our objective/loss function as least squares between Ex and y
+    f = LeastSquares(E, rd, c=1)
+
+    # No regularisation
+    G = ZeroFunction()
+
+    # Set up FISTA
+    fista = FISTA(initial=x_init, f=f, g=G)
+    fista.max_iteration = 100
+    fista.update_objective_interval = 5
+
+    # Run FISTA for least squares
+    fista.run(40, verbose=True)
+    
+    # Retrieve images
+    image_data = fista.get_output('image')
+    
+    # Save dicome images
+    util.write_dicom(image_data, fprefix_out)
+
+    return(True)
+
+
+def sirf_m2d_cine_cart_recon(fname_raw: str, fpath_output_prefix: Path):
+    mr_data = preprocess.equally_fill_cardiac_phases(fname_raw)
+    return(sirf_cine_recon(mr_data, fpath_output_prefix))
+            
+            
 def sirf_cine_recon(mr_rawdata: pMR.AcquisitionData, fprefix_out: Path):
 
     # Pre-process this input data.
@@ -58,12 +128,12 @@ def sirf_cine_recon(mr_rawdata: pMR.AcquisitionData, fprefix_out: Path):
     print('---\n reconstructing...\n')
     recon.process()
 
-    # retrieve reconstruced image and G-factor data
+    # Retrieve reconstruced image
     # image_data = recon.get_output('Image PhysioInterp')
     image_data = recon.get_output('image')
-    print(f"We have {image_data.number()} images to write.")
-    image_data = image_data.abs()
-    image_data.write(str(fprefix_out / "sirfrecon.dcm"))
+    
+    # Save dicome images
+    util.write_dicom(image_data, fprefix_out)
 
     return True
 
@@ -73,6 +143,6 @@ path_in  = Path(sys.argv[1])
 path_out = Path(sys.argv[2])
 
 if __name__ == "__main__":
-    success = main_cine_recon(path_in, path_out)
+    success = main_recon(path_in, path_out)
     sys.exit(success)
 
