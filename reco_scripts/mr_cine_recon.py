@@ -81,13 +81,13 @@ def sirf_2d_rt_non_cart_recon(fname_raw: str, fprefix_out: Path):
     # Set up FISTA
     fista = FISTA(initial=x_init, f=f, g=G)
     fista.max_iteration = 100
-    fista.update_objective_interval = 5
+    fista.update_objective_interval = 10
 
     # Run FISTA for least squares
-    fista.run(40, verbose=True)
+    fista.run(20, verbose=True)
     
     # Retrieve images
-    image_data = fista.get_output('image')
+    image_data = fista.get_output()
     
     # Save dicome images
     util.write_dicom(image_data, fprefix_out)
