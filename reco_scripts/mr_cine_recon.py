@@ -10,6 +10,7 @@ from cil.optimisation.algorithms import FISTA
 from cil.optimisation.functions import LeastSquares, ZeroFunction
 
 import sys
+import numpy as np
 from pathlib import Path
 
 # Support scan times
@@ -65,32 +66,50 @@ def sirf_2d_rt_non_cart_recon(fname_raw: str, fprefix_out: Path):
     csm = pMR.CoilSensitivityData()
     csm.smoothness = 100
     csm.calculate(rd)
-
-    # Set up iterative reconstruction
-    x_init = pMR.ImageData()
-    x_init.from_acquisition_data(rd)
-    E = pMR.AcquisitionModel(acqs=rd, imgs=x_init)
-    E.set_coil_sensitivity_maps(csm)
-
-    # Define our objective/loss function as least squares between Ex and y
-    f = LeastSquares(E, rd, c=1)
-
-    # No regularisation
-    G = ZeroFunction()
-
-    # Set up FISTA
-    fista = FISTA(initial=x_init, f=f, g=G)
-    fista.max_iteration = 100
-    fista.update_objective_interval = 10
-
-    # Run FISTA for least squares
-    fista.run(20, verbose=True)
     
-    # Retrieve images
-    image_data = fista.get_output()
-    
-    # Save dicome images
-    util.write_dicom(image_data, fprefix_out)
+    for ind in range(2):
+        
+        if ind == 1: # Dynamic reconstruction
+            phases = np.unique(rd.get_ISMRMRD_info('phase'))
+            assert len(phases) == 1, f'Already {len(phases)} found. Dynamic splitting can only be done for a data with a single phase.'
+
+            # Number of radial lines per dynamic phase
+            nrad_per_phase = 12
+            
+            # Assign phase indices to data
+            curr_phase_idx = 0
+            for i in range(rd.number()):
+                acq = rd.acquisition(i)
+                acq.set_phase(curr_phase_idx)
+                print(f'{i} - {curr_phase_idx} - {nrad_per_phase}')
+                
+                if np.mod(i, nrad_per_phase) == nrad_per_phase-1:
+                    curr_phase_idx += 1
+                
+        # Set up iterative reconstruction
+        x_init = pMR.ImageData()
+        x_init.from_acquisition_data(rd)
+        E = pMR.AcquisitionModel(acqs=rd, imgs=x_init)
+        E.set_coil_sensitivity_maps(csm)
+
+        # Define our objective/loss function as least squares between Ex and y
+        f = LeastSquares(E, rd, c=1)
+
+        # No regularisation
+        G = ZeroFunction()
+
+        # Set up FISTA
+        fista = FISTA(initial=x_init, f=f, g=G)
+        fista.update_objective_interval = 10
+
+        # Run FISTA for least squares
+        fista.run(20, verbose=True)
+        
+        # Retrieve images
+        image_data = fista.get_output()
+        
+        # Save dicome images
+        util.write_dicom(image_data, fprefix_out)
 
     return(True)
 

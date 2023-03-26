@@ -11,6 +11,6 @@ def write_dicom(image_data, fprefix_out):
     
     # Verify that dicoms were written
     dcm_data = list(fprefix_out.glob("*.dcm"))
-    assert len(dcm_data) > 1, 'No dicom images were written.'
+    assert len(dcm_data) > 0, 'No dicom images were written.'
     
     return True
