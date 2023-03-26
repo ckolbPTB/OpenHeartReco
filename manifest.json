@@ -6,7 +6,7 @@
   "schema-version": "1.0",
   "type": "docker",
   "image": "ckolbptb/oh_reco",
-  "command-line": "",
+  "command-line": "./execution.sh",
   "mounts": [
       {
           "name": "raw-in",
