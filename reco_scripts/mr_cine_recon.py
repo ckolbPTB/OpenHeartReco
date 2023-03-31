@@ -48,6 +48,9 @@ def main_recon(fpath_in, fpath_output_prefix):
 
 def sirf_2d_rt_non_cart_recon(fname_raw: str, fprefix_out: Path):
     
+    # Number of radial lines per image
+    num_rad_per_image = 64
+    
     # Load in data
     rd = pMR.AcquisitionData(fname_raw, all_=False)
     rd = pMR.preprocess_acquisition_data(rd)
@@ -62,54 +65,70 @@ def sirf_2d_rt_non_cart_recon(fname_raw: str, fprefix_out: Path):
     # Verify data is not Cartesian
     assert rd.check_traj_type('cartesian') == False, 'Cartesian data cannot be reconstructed as radial'
     
-    # Calculate coil sensitivity maps
+    # Calculate coil sensitivity maps combining all data
     csm = pMR.CoilSensitivityData()
     csm.smoothness = 100
     csm.calculate(rd)
+    csm_arr = csm.as_array()
     
-    for ind in range(2):
-        
-        if ind == 1: # Dynamic reconstruction
-            phases = np.unique(rd.get_ISMRMRD_info('phase'))
-            assert len(phases) == 1, f'Already {len(phases)} found. Dynamic splitting can only be done for a data with a single phase.'
+    # Calculate number of images
+    num_recon_imgs = np.floor(rd.number() / num_rad_per_image)
+    print(f'Data set with {rd.number()} radial lines split into {num_recon_imgs} images')
+    
+    # Split data into dynamics
+    phases = np.unique(rd.get_ISMRMRD_info('phase'))
+    assert len(phases) == 1, f'Already {len(phases)} found. Dynamic splitting can only be done for a data with a single phase.'
 
-            # Number of radial lines per dynamic phase
-            nrad_per_phase = 12
-            
-            # Assign phase indices to data
-            curr_phase_idx = 0
-            for i in range(rd.number()):
-                acq = rd.acquisition(i)
-                acq.set_phase(curr_phase_idx)
-                print(f'{i} - {curr_phase_idx} - {nrad_per_phase}')
-                
-                if np.mod(i, nrad_per_phase) == nrad_per_phase-1:
-                    curr_phase_idx += 1
-                
-        # Set up iterative reconstruction
-        x_init = pMR.ImageData()
-        x_init.from_acquisition_data(rd)
-        E = pMR.AcquisitionModel(acqs=rd, imgs=x_init)
-        E.set_coil_sensitivity_maps(csm)
+    rd.set_encoding_limit('phase', (0, num_recon_imgs, 0))
 
-        # Define our objective/loss function as least squares between Ex and y
-        f = LeastSquares(E, rd, c=1)
+    rd_dyn = rd.new_acquisition_data()
+    for ia in range(rd.number()):
+        acq = rd.acquisition(ia)
+        acq.set_phase(int(np.floor(ia / rd.number()* num_recon_imgs)))
+        rd_dyn.append_acquisition(acq)
 
-        # No regularisation
-        G = ZeroFunction()
+    rd_dyn.sort_by_time()
+    
+    # Calculate coil sensitivity maps
+    csm = pMR.CoilSensitivityData()
+    csm.smoothness = 100
+    csm.calculate(rd_dyn)
+    
+    # Use the same coil map (calculated using all the data) for each phase
+    print(f'Dimensions of csm {csm.shape}')
+    num_phases = csm.as_array().shape[1]
+    csm_arr = np.tile(csm_arr, (1,num_phases,1,1))
+    csm_arr = np.swapaxes(csm_arr, 0, 1) # unfortunately these two axes have to be swapped.
+    csm = csm.fill(csm_arr.astype(csm.as_array().dtype))
+    
+    # Set up iterative reconstruction
+    x_init = pMR.ImageData()
+    x_init.from_acquisition_data(rd_dyn)
+    print(f'Dimensions of initial image {x_init.shape}')
+    
+    E = pMR.AcquisitionModel(acqs=rd_dyn, imgs=x_init)
+    E.set_coil_sensitivity_maps(csm)
+    
+    # Define our objective/loss function as least squares between Ex and y
+    f = LeastSquares(E, rd_dyn, c=1)
 
-        # Set up FISTA
-        fista = FISTA(initial=x_init, f=f, g=G)
-        fista.update_objective_interval = 10
+    # No regularisation
+    G = ZeroFunction()
 
-        # Run FISTA for least squares
-        fista.run(20, verbose=True)
-        
-        # Retrieve images
-        image_data = fista.get_output()
-        
-        # Save dicome images
-        util.write_dicom(image_data, fprefix_out)
+    # Set up FISTA
+    fista = FISTA(initial=x_init, f=f, g=G)
+    fista.update_objective_interval = 10
+
+    # Run FISTA for least squares
+    fista.run(100, verbose=True)
+    
+    # Retrieve images
+    image_data = fista.get_output()
+    
+    print('Shape of reconstructed images ', image_data.shape)
+    
+    # Save dicome images
+    util.write_dicom(image_data, fprefix_out)
 
     return(True)
 
