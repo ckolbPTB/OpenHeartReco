@@ -28,6 +28,7 @@ def main_recon(fpath_in, fpath_output_prefix):
     success = True
 
     for fname_raw in list_rawdata:
+        print(f'Reconstructing file {fname_raw}')
         # Select reconstruction type
         scan_type_code = str(fname_raw)[-7:-3]
         if scan_type_code == '0001': # M2D Cartesian Cine
