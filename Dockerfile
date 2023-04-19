@@ -33,7 +33,6 @@ ARG SIRF_SB_TAG="v3.4.0"
 # get specific version of SIRF 
 ENV INSTALL_DIR=/opt
 #RUN git clone -b oh-recon --single-branch https://github.com/johannesmayer/SIRF.git --depth 1 $INSTALL_DIR/SIRF
-
 RUN git clone -b open-heart-reco https://github.com/ckolbPTB/SIRF.git $INSTALL_DIR/SIRF
 
 # install gadgetron and sirf

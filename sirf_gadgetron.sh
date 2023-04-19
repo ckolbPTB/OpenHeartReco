@@ -34,7 +34,6 @@ ${APT_GET_INSTALL} libhdf5-serial-dev\
 
 # SIRF-SuperBuild 
 SIRF_SB_URL="https://github.com/SyneRBI/SIRF-SuperBuild"
-SIRF_SB_TAG="master"
 NUM_PARALLEL_BUILDS="20"
 INSTALL_DIR="/opt"
 
