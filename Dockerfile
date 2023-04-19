@@ -44,6 +44,9 @@ ENV PATH=/opt/SIRF-SuperBuild/INSTALL/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/SIRF-SuperBuild/INSTALL/lib:$LD_LIBRARY_PATH
 ENV PYTHONPATH=/opt/SIRF-SuperBuild/INSTALL/python:$PYTHONPATH
 
+# remove SIRF repo folder
+RUN rm -r $INSTALL_DIR/SIRF
+
 # reconstruction code
 RUN mkdir /reco_scripts
 COPY reco_scripts/sirf_preprocessing.py /reco_scripts
